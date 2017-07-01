@@ -12,9 +12,12 @@ namespace pubgbot.dbcontext
         public int Id { get; set; }
 
         [StringLength(150)]
-        public string Name { get; set; }
+        public string DiscordName { get; set; }
 
         [StringLength(150)]
         public string SteamId { get; set; }
+
+        [StringLength(50)]
+        public string Location { get; set; }
     }
 }

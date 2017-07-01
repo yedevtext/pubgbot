@@ -2,52 +2,84 @@
 using System.Collections.Generic;
 using System.Configuration;
 using System.Data.Entity;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using Discord;
 using Discord.WebSocket;
 using HtmlAgilityPack;
 using Newtonsoft.Json;
 using pubgbot.dbcontext;
+using pubgbot.Types;
 using Configuration = System.Configuration.Configuration;
 
 namespace pubgbot
 {
     class Program
     {
-        private static string _token = ConfigurationManager.AppSettings["token"];
-        private static string _url = "https://pubgtracker.com/api/search?steamId=";
-        private static HttpClient _httpClient;
-
+        private readonly string _token = ConfigurationManager.AppSettings["token"];
+        private DiscordSocketClient _client;
+        private pubgdbModel _pubgdbModel;
+        private CancellationTokenSource _cancellationTokenSource;
+        private bool _isDisposing = false;
         static void Main(string[] args) => new Program().MainAsync().GetAwaiter().GetResult();
 
         public async Task MainAsync()
         {
-            _httpClient = new HttpClient();
-            var client = new DiscordSocketClient();
+            Console.CancelKeyPress += ConsoleOnCancelKeyPress;
+            AppDomain.CurrentDomain.ProcessExit += CurrentDomainOnProcessExit;
+            _cancellationTokenSource = new CancellationTokenSource();
+            _pubgdbModel = new pubgdbModel();
+            _client = new DiscordSocketClient();
+            _client.Log += Log;
 
-            client.Log += Log;
-
-            await client.LoginAsync(TokenType.Bot, _token);
-            await client.StartAsync();
-
-            client.MessageReceived += MessageReceived;
+            await _client.LoginAsync(TokenType.Bot, _token);
+            await _client.StartAsync();
+            _client.MessageReceived += MessageHandler;
 
             // Block this task until the program is closed.
-            await Task.Delay(-1).ContinueWith(Dispose);
+            try
+            {
+                await Task.Delay(-1, _cancellationTokenSource.Token);
+            }
+            catch (Exception)
+            {
+                // sowallow  the cancelation exception message as the app tries to restart on exception.
+            }
         }
 
-        private void Dispose(Task obj)
+        private void CurrentDomainOnProcessExit(object sender, EventArgs eventArgs)
         {
-            _httpClient.Dispose();
-            obj.Dispose();
+            if (!_isDisposing)
+                Dispose();
+        }
+
+        private void ConsoleOnCancelKeyPress(object sender, ConsoleCancelEventArgs consoleCancelEventArgs)
+        {
+            if (!_isDisposing)
+                Dispose();
         }
 
 
-        private async Task MessageReceived(SocketMessage message)
+        /// <summary>
+        /// hmm.... not sure this is proper or being used as i think it would be.
+        /// I wanted to dispose of items after the process was closed.
+        /// somehow after the Task.Delay(-1) being killed.
+        /// </summary>
+        /// <param name="obj"></param>
+        public void Dispose()
+        {
+            _isDisposing = true;
+            _client.Dispose();
+            _pubgdbModel.Dispose();
+            _cancellationTokenSource.Cancel();
+        }
+
+        private async Task MessageHandler(SocketMessage message)
         {
             await AddUser(message);
             await GetUserStats(message);
@@ -59,63 +91,69 @@ namespace pubgbot
             return Task.CompletedTask;
         }
 
+        #region Bot
 
-        private static async Task GetUserStats(SocketMessage message)
+        private async Task GetUserStats(SocketMessage message)
         {
             if (message.Content.Contains("!statsme"))
             {
-                HttpResponseMessage httpresults;
-                User userModel;
-                using (var context = new pubgdbModel())
-                {
-                    userModel = await context.Users.FirstOrDefaultAsync(user => user.Name == message.Author.Username);
-
-                    //httpresults = _httpClient.GetAsync(_url + userModel.SteamId).GetAwaiter().GetResult();
-                }
-
-                var web = new HtmlWeb();
-                var document = web.Load(_url + userModel.SteamId);
-                //"https://pubgtracker.com/api/search?steamId=76561198000166636"
-
-                //         //*[@id="profile"]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/span[2]
-                //var soloRating = document.DocumentNode
-                //    .SelectNodes("//*[@id=\"profile\"]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/span[2]")
-                //    .First()
-                //    .Attributes["value"].Value;
-                //*[@id="profile"]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/span[2]
-                //var soloRating = document.DocumentNode.SelectNodes("//*[@id=\"profile\"]/div[2]/div[2]/div[1]/div[2]/div[2]/div[1]/span[2]");
-                //Regex.Replace(
-                //    $@"{
-                //            document.DocumentNode.SelectNodes("/html/body/div[1]/div[1]/script[3]")[0].InnerText
-                //                .Split('=')[1]
-                //        }", @"\", " ");
-
-                var playerDataRaw = document.DocumentNode.SelectNodes("/html/body/div[1]/div[1]/script[3]")[0]
-                    .InnerText.Split('=')[1].Split(';')[0];
-
-                var playerData = playerDataRaw.Replace(@"\", " ");
-
-                var x = playerData;
-                await message.Channel.SendMessageAsync($"Stats for {message.Author.Username} SoloRating: ");
+                var userModel = await GetByDiscordUser(message);
+                var player = new Player(userModel.SteamId);
+                var soloRating = player.Data.Stats.Where(region => region.Region == userModel.Location &&
+                                                                   region.Match == MatchType.Solo);
+                var duoRating = player.Data.Stats.Where(region => region.Region == userModel.Location &&
+                                                                   region.Match == MatchType.Duo);
+                var squadRating = player.Data.Stats.Where(region => region.Region == userModel.Location &&
+                                                                  region.Match == MatchType.Squad);
+                await message.Channel.SendMessageAsync(
+                    $"Stats for {message.Author.Username} Solo Rating: {soloRating}, Duo rating: {duoRating}, Squad Rating: {squadRating}");
             }
         }
 
-        private static async Task AddUser(SocketMessage message)
+        private async Task AddUser(SocketMessage message)
         {
-            if (message.Content.Contains("!addme"))
+            if (message.Content.Contains(BotCommands.AddMe))
             {
-                using (var context = new pubgdbModel())
-                {
-                    context.Users.Add(new User()
-                    {
-                        Name = message.Author.Username,
-                        SteamId = Regex.Split(message.Content, "!addme")[1].Trim()
-                    });
-
-                    await context.SaveChangesAsync();
-                }
-                await message.Channel.SendMessageAsync($"Pong! {message.Author.Username}");
+                await AddOrUpdateByDiscordUser(message);
+                await message.Channel.SendMessageAsync($"{message.Author.Username} has been added for Tracking.");
             }
         }
+
+        #endregion
+
+
+        #region Data
+
+        private async Task AddOrUpdateByDiscordUser(SocketMessage message)
+        {
+            var existingUser = await GetByDiscordUser(message);
+
+            if (existingUser == null)
+            {
+                _pubgdbModel.Users.Add(new User()
+                {
+                    DiscordName = message.Author.Username,
+                    SteamId = Regex.Split(message.Content, BotCommands.AddMe)[1].Trim(),
+                    Location = Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim()
+                });
+                await _pubgdbModel.SaveChangesAsync();
+            }
+            else
+            {
+                existingUser.DiscordName = message.Author.Username;
+                existingUser.SteamId = Regex.Split(message.Content, BotCommands.AddMe)[1].Trim();
+                existingUser.Location = Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim();
+
+                _pubgdbModel.Users.Attach(existingUser);
+                await _pubgdbModel.SaveChangesAsync();
+            }
+        }
+
+        private async Task<User> GetByDiscordUser(SocketMessage message)
+        {
+            return await _pubgdbModel.Users.FirstOrDefaultAsync(user => user.DiscordName == message.Author.Username);
+        }
+
+        #endregion
     }
 }

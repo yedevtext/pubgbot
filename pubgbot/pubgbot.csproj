@@ -212,10 +212,19 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="BotCommands.cs" />
     <Compile Include="dbcontext\pubgdbModel.cs" />
     <Compile Include="dbcontext\User.cs" />
+    <Compile Include="Dto\Stat.cs" />
+    <Compile Include="Dto\LiveTracking.cs" />
+    <Compile Include="Dto\PlayerData.cs" />
+    <Compile Include="Dto\StatRegion.cs" />
+    <Compile Include="Player.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Types\MatchType.cs" />
+    <Compile Include="Types\Region.cs" />
+    <Compile Include="Types\StatType.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
