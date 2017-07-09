@@ -10,5 +10,7 @@ namespace pubgbot
     {
         public const string AddMe = "!addme";
         public const string AddMyLocation = "!addmylocation";
+        public const string StatsMe = "!statsme";
+        public const string AddSteamFriends = "!addsteamfriends";
     }
 }

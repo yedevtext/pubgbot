@@ -95,18 +95,18 @@ namespace pubgbot
 
         private async Task GetUserStats(SocketMessage message)
         {
-            if (message.Content.Contains("!statsme"))
+            if (message.Content.Contains(BotCommands.StatsMe))
             {
                 var userModel = await GetByDiscordUser(message);
                 var player = new Player(userModel.SteamId);
-                var soloRating = player.Data.Stats.Where(region => region.Region == userModel.Location &&
+                var soloRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
                                                                    region.Match == MatchType.Solo);
-                var duoRating = player.Data.Stats.Where(region => region.Region == userModel.Location &&
+                var duoRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
                                                                    region.Match == MatchType.Duo);
-                var squadRating = player.Data.Stats.Where(region => region.Region == userModel.Location &&
+                var squadRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
                                                                   region.Match == MatchType.Squad);
                 await message.Channel.SendMessageAsync(
-                    $"Stats for {message.Author.Username} Solo Rating: {soloRating}, Duo rating: {duoRating}, Squad Rating: {squadRating}");
+                    $"Stats for {message.Author.Username} Solo Rating: {soloRating?.Stats.FirstOrDefault(stat=> stat.field == StatType.Rating)?.displayValue}, Duo rating: {duoRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}, Squad Rating: {squadRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}");
             }
         }
 
@@ -133,8 +133,8 @@ namespace pubgbot
                 _pubgdbModel.Users.Add(new User()
                 {
                     DiscordName = message.Author.Username,
-                    SteamId = Regex.Split(message.Content, BotCommands.AddMe)[1].Trim(),
-                    Location = Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim()
+                    SteamId = Regex.Split(message.Content, " ")[1].Trim(),
+                    Location = Regex.Split(message.Content, " ")?[2]?.Trim()
                 });
                 await _pubgdbModel.SaveChangesAsync();
             }
