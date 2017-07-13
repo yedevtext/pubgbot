@@ -214,6 +214,7 @@
   <ItemGroup>
     <Compile Include="BotCommands.cs" />
     <Compile Include="dbcontext\pubgdbModel.cs" />
+    <Compile Include="dbcontext\Stat.cs" />
     <Compile Include="dbcontext\User.cs" />
     <Compile Include="Dto\Stat.cs" />
     <Compile Include="Dto\LiveTracking.cs" />
@@ -246,6 +247,7 @@
       <Install>false</Install>
     </BootstrapperPackage>
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
