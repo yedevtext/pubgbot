@@ -12,18 +12,10 @@ namespace pubgbot.dbcontext
         {
         }
 
-        public virtual DbSet<Stat> Stats { get; set; }
         public virtual DbSet<User> Users { get; set; }
 
         protected override void OnModelCreating(DbModelBuilder modelBuilder)
         {
-            modelBuilder.Entity<Stat>()
-                .Property(e => e.ValueDec)
-                .HasPrecision(18, 0);
-
-            modelBuilder.Entity<Stat>()
-                .Property(e => e.Percentile)
-                .HasPrecision(18, 0);
         }
     }
 }

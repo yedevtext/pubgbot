@@ -18,6 +18,6 @@ namespace pubgbot.dbcontext
         public string SteamId { get; set; }
 
         [StringLength(50)]
-        public string Region { get; set; }
+        public string Location { get; set; }
     }
 }

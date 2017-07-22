@@ -99,38 +99,20 @@ namespace pubgbot
             {
                 var userModel = await GetByDiscordUser(message);
                 var player = new Player(userModel.SteamId);
-                var soloRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Region &&
+                var soloRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
                                                                    region.Match == MatchType.Solo);
-                var duoRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Region &&
+                var duoRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
                                                                    region.Match == MatchType.Duo);
-                var squadRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Region &&
+                var squadRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
                                                                   region.Match == MatchType.Squad);
-
                 await message.Channel.SendMessageAsync(
                     $"Stats for {message.Author.Username} Solo Rating: {soloRating?.Stats.FirstOrDefault(stat=> stat.field == StatType.Rating)?.displayValue}, Duo rating: {duoRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}, Squad Rating: {squadRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}");
-
-                await UpdateStats(userModel, player);
-            }
-        }
-
-        private async Task UpdateStats(User userModel, Player player)
-        {
-            using (var context = new pubgdbModel())
-            {
-                var oldStats = context.Stats.Where(stat => stat.SteamId == userModel.SteamId);
-                if(oldStats.Any())
-                    context.Stats.RemoveRange(oldStats);
-
-                var newStats = player.Data.Stats.Where(region => region.Region == userModel.Region);
-                //var stats = newStats.Where(region => region.Region)
-                await Task.Delay(2);
-                //return Task.Delay(2);
             }
         }
 
         private async Task AddUser(SocketMessage message)
         {
-            if (message.Content.Contains(BotCommands.AddUser))
+            if (message.Content.Contains(BotCommands.AddMe))
             {
                 await AddOrUpdateByDiscordUser(message);
                 await message.Channel.SendMessageAsync($"{message.Author.Username} has been added for Tracking.");
@@ -152,15 +134,15 @@ namespace pubgbot
                 {
                     DiscordName = message.Author.Username,
                     SteamId = Regex.Split(message.Content, " ")[1].Trim(),
-                    Region = Regex.Split(message.Content, " ")?[2]?.Trim()
+                    Location = Regex.Split(message.Content, " ")?[2]?.Trim()
                 });
                 await _pubgdbModel.SaveChangesAsync();
             }
             else
             {
                 existingUser.DiscordName = message.Author.Username;
-                existingUser.SteamId = Regex.Split(message.Content, BotCommands.AddUser)[1].Trim();
-                existingUser.Region = Regex.Split(message.Content, BotCommands.AddUser)?[2]?.Trim();
+                existingUser.SteamId = Regex.Split(message.Content, BotCommands.AddMe)[1].Trim();
+                existingUser.Location = Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim();
 
                 _pubgdbModel.Users.Attach(existingUser);
                 await _pubgdbModel.SaveChangesAsync();
