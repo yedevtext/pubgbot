@@ -13,6 +13,7 @@ using Discord;
 using Discord.WebSocket;
 using HtmlAgilityPack;
 using Newtonsoft.Json;
+using NLog;
 using pubgbot.dbcontext;
 using pubgbot.Types;
 using Configuration = System.Configuration.Configuration;
@@ -21,9 +22,11 @@ namespace pubgbot
 {
     class Program
     {
+        private static Logger logToFile = LogManager.GetLogger("filelogger");
+        private static Logger logToConsole = LogManager.GetLogger("consolelogger");
+
         private readonly string _token = ConfigurationManager.AppSettings["token"];
         private DiscordSocketClient _client;
-        private pubgdbModel _pubgdbModel;
         private CancellationTokenSource _cancellationTokenSource;
         private bool _isDisposing = false;
         static void Main(string[] args) => new Program().MainAsync().GetAwaiter().GetResult();
@@ -33,7 +36,7 @@ namespace pubgbot
             Console.CancelKeyPress += ConsoleOnCancelKeyPress;
             AppDomain.CurrentDomain.ProcessExit += CurrentDomainOnProcessExit;
             _cancellationTokenSource = new CancellationTokenSource();
-            _pubgdbModel = new pubgdbModel();
+
             _client = new DiscordSocketClient();
             _client.Log += Log;
 
@@ -75,7 +78,6 @@ namespace pubgbot
         {
             _isDisposing = true;
             _client.Dispose();
-            _pubgdbModel.Dispose();
             _cancellationTokenSource.Cancel();
         }
 
@@ -87,7 +89,33 @@ namespace pubgbot
 
         private Task Log(LogMessage msg)
         {
-            Console.WriteLine(msg.ToString());
+            switch (msg.Severity)
+            {
+                case  LogSeverity.Critical:
+                    logToFile.Fatal(msg);
+                    logToConsole.Fatal(msg);
+                    break;
+                case LogSeverity.Error:
+                    logToFile.Error(msg);
+                    logToConsole.Error(msg);
+                    break;
+                case LogSeverity.Debug:
+                    logToFile.Debug(msg);
+                    logToConsole.Debug(msg);
+                    break;
+                case LogSeverity.Info:
+                    logToFile.Info(msg);
+                    logToConsole.Info(msg);
+                    break;
+                case LogSeverity.Warning:
+                    logToFile.Warn(msg);
+                    logToConsole.Warn(msg);
+                    break;
+                case LogSeverity.Verbose:
+                    logToFile.Trace(msg);
+                    logToConsole.Trace(msg);
+                    break;
+            }
             return Task.CompletedTask;
         }
 
@@ -97,16 +125,35 @@ namespace pubgbot
         {
             if (message.Content.Contains(BotCommands.StatsMe))
             {
-                var userModel = await GetByDiscordUser(message);
-                var player = new Player(userModel.SteamId);
-                var soloRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
-                                                                   region.Match == MatchType.Solo);
-                var duoRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
-                                                                   region.Match == MatchType.Duo);
-                var squadRating = player.Data.Stats.FirstOrDefault(region => region.Region == userModel.Location &&
-                                                                  region.Match == MatchType.Squad);
-                await message.Channel.SendMessageAsync(
-                    $"Stats for {message.Author.Username} Solo Rating: {soloRating?.Stats.FirstOrDefault(stat=> stat.field == StatType.Rating)?.displayValue}, Duo rating: {duoRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}, Squad Rating: {squadRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}");
+                try
+                {
+                    using (var context = new pubgdbModel())
+                    {
+                        var userModel = await context.Users.FirstOrDefaultAsync(
+                            user => user.DiscordName == message.Author.Username);
+                        var player = new Player(userModel.SteamId);
+                        var soloRating = player.Data.Stats.FirstOrDefault(
+                            region => region.Region == userModel.Location &&
+                                      region.Match == MatchType.Solo);
+                        var duoRating = player.Data.Stats.FirstOrDefault(
+                            region => region.Region == userModel.Location &&
+                                      region.Match == MatchType.Duo);
+                        var squadRating = player.Data.Stats.FirstOrDefault(
+                            region => region.Region == userModel.Location &&
+                                      region.Match == MatchType.Squad);
+                        await message.Channel.SendMessageAsync(
+                            $"Stats for {message.Author.Username} Solo Rating: {soloRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}, Duo rating: {duoRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}, Squad Rating: {squadRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}");
+                    }
+                }
+                catch (Exception e)
+                {
+                    await message.Channel.SendMessageAsync(
+                        $"pubgbot failed to retrieve stats for {message.Author.Username}.");
+                    logToFile.Error(e);
+                    logToConsole.Error(e);
+                    //Console.WriteLine(e);
+                    throw;
+                }
             }
         }
 
@@ -126,33 +173,40 @@ namespace pubgbot
 
         private async Task AddOrUpdateByDiscordUser(SocketMessage message)
         {
-            var existingUser = await GetByDiscordUser(message);
-
-            if (existingUser == null)
+            using (var context = new pubgdbModel())
             {
-                _pubgdbModel.Users.Add(new User()
+                var existingUser = await context.Users.FirstOrDefaultAsync(
+                    user => user.DiscordName == message.Author.Username);
+
+                if (existingUser == null)
                 {
-                    DiscordName = message.Author.Username,
-                    SteamId = Regex.Split(message.Content, " ")[1].Trim(),
-                    Location = Regex.Split(message.Content, " ")?[2]?.Trim()
-                });
-                await _pubgdbModel.SaveChangesAsync();
-            }
-            else
-            {
-                existingUser.DiscordName = message.Author.Username;
-                existingUser.SteamId = Regex.Split(message.Content, BotCommands.AddMe)[1].Trim();
-                existingUser.Location = Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim();
-
-                _pubgdbModel.Users.Attach(existingUser);
-                await _pubgdbModel.SaveChangesAsync();
+                    context.Users.Add(new User()
+                    {
+                        DiscordName = message.Author.Username,
+                        SteamId = Regex.Split(message.Content, " ")[1].Trim(),
+                        Location = Regex.Split(message.Content, " ")?[2]?.Trim()
+                    });
+                    await context.SaveChangesAsync();
+                }
+                else
+                {
+                    existingUser.DiscordName = message.Author.Username;
+                    existingUser.SteamId = Regex.Split(message.Content, BotCommands.AddMe)[1].Trim();
+                    existingUser.Location = Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim();
+                    //context.Entry(existingUser).State = EntityState.Modified;
+                    await context.SaveChangesAsync();
+                }
             }
         }
 
-        private async Task<User> GetByDiscordUser(SocketMessage message)
-        {
-            return await _pubgdbModel.Users.FirstOrDefaultAsync(user => user.DiscordName == message.Author.Username);
-        }
+        //private async Task<User> GetByDiscordUser(SocketMessage message)
+        //{
+        //    using (var context = new pubgdbModel())
+        //    {
+        //        return await context.Users.FirstOrDefaultAsync(
+        //            user => user.DiscordName == message.Author.Username);
+        //    }
+        //}
 
         #endregion
     }
