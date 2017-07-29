@@ -11,12 +11,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Discord;
 using Discord.WebSocket;
-using HtmlAgilityPack;
 using Newtonsoft.Json;
 using NLog;
 using pubgbot.dbcontext;
 using pubgbot.Types;
+using PUBGSharp.Data;
 using Configuration = System.Configuration.Configuration;
+using Region = PUBGSharp.Data.Region;
 
 namespace pubgbot
 {
@@ -87,11 +88,17 @@ namespace pubgbot
             await GetUserStats(message);
         }
 
+        //private Task Log(LogMessage msg)
+        //{
+        //    Console.WriteLine(msg.ToString());
+        //    return Task.CompletedTask;
+        //}
+
         private Task Log(LogMessage msg)
         {
             switch (msg.Severity)
             {
-                case  LogSeverity.Critical:
+                case LogSeverity.Critical:
                     logToFile.Fatal(msg);
                     logToConsole.Fatal(msg);
                     break;
@@ -131,18 +138,20 @@ namespace pubgbot
                     {
                         var userModel = await context.Users.FirstOrDefaultAsync(
                             user => user.DiscordName == message.Author.Username);
-                        var player = new Player(userModel.SteamId);
-                        var soloRating = player.Data.Stats.FirstOrDefault(
-                            region => region.Region == userModel.Location &&
-                                      region.Match == MatchType.Solo);
-                        var duoRating = player.Data.Stats.FirstOrDefault(
-                            region => region.Region == userModel.Location &&
-                                      region.Match == MatchType.Duo);
-                        var squadRating = player.Data.Stats.FirstOrDefault(
-                            region => region.Region == userModel.Location &&
-                                      region.Match == MatchType.Squad);
+                        var player = await Player.GetStats(userModel.SteamId);
+                        var soloRating = player.Stats.FirstOrDefault(
+                            region => region.Region == userModel.Region &&
+                                      region.Mode == Mode.Solo);
+                        var duoRating = player.Stats.FirstOrDefault(
+                            region => region.Region == userModel.Region &&
+                                      region.Mode == Mode.Duo);
+                        var squadRating = player.Stats.FirstOrDefault(
+                            region => region.Region == userModel.Region &&
+                                      region.Mode == Mode.Squad);
+                        logToConsole.Trace(
+                            $"Stats for {message.Author.Username} Solo Rating: {soloRating?.Stats.FirstOrDefault(stat => stat.Stat == StatType.Rating)?.Value}, Duo rating: {duoRating?.Stats.FirstOrDefault(stat => stat.Stat == StatType.Rating)?.Value}, Squad Rating: {squadRating?.Stats.FirstOrDefault(stat => stat.Stat == StatType.Rating)?.Value}");
                         await message.Channel.SendMessageAsync(
-                            $"Stats for {message.Author.Username} Solo Rating: {soloRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}, Duo rating: {duoRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}, Squad Rating: {squadRating?.Stats.FirstOrDefault(stat => stat.field == StatType.Rating)?.displayValue}");
+                            $"Stats for {message.Author.Username} Solo Rating: {soloRating?.Stats.FirstOrDefault(stat => stat.Stat == StatType.Rating)?.Value}, Duo rating: {duoRating?.Stats.FirstOrDefault(stat => stat.Stat == StatType.Rating)?.Value}, Squad Rating: {squadRating?.Stats.FirstOrDefault(stat => stat.Stat == StatType.Rating)?.Value}");
                     }
                 }
                 catch (Exception e)
@@ -173,28 +182,42 @@ namespace pubgbot
 
         private async Task AddOrUpdateByDiscordUser(SocketMessage message)
         {
+            User newuser = null;
+            User existingUser = null;
             using (var context = new pubgdbModel())
             {
-                var existingUser = await context.Users.FirstOrDefaultAsync(
+                existingUser = await context.Users.FirstOrDefaultAsync(
                     user => user.DiscordName == message.Author.Username);
-
+                logToConsole.Trace(existingUser == null
+                    ? "No User found."
+                    : $"User retrieved from database {existingUser.DiscordName}, {existingUser.SteamId}");
                 if (existingUser == null)
                 {
-                    context.Users.Add(new User()
+                    var regiontemp = Regex.Split(message.Content, " ")?[2]?.Trim();
+
+
+                    newuser = new User()
                     {
                         DiscordName = message.Author.Username,
                         SteamId = Regex.Split(message.Content, " ")[1].Trim(),
-                        Location = Regex.Split(message.Content, " ")?[2]?.Trim()
-                    });
+                        Region = RegionConverter.Convert(Regex.Split(message.Content, " ")?[2])
+                    };
+
+                    context.Users.Add(newuser);
                     await context.SaveChangesAsync();
+                    logToConsole.Trace(
+                        $"Added new user to database Discord User: {message.Author.Username} --- Database model ---> DiscordName: {newuser.DiscordName}, Steam id: {newuser.SteamId}");
                 }
                 else
                 {
                     existingUser.DiscordName = message.Author.Username;
                     existingUser.SteamId = Regex.Split(message.Content, BotCommands.AddMe)[1].Trim();
-                    existingUser.Location = Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim();
+                    existingUser.Region =
+                        RegionConverter.Convert(Regex.Split(message.Content, BotCommands.AddMe)?[2]?.Trim());
                     //context.Entry(existingUser).State = EntityState.Modified;
                     await context.SaveChangesAsync();
+                    logToConsole.Trace(
+                        $"Updated existing user to database Discord User: {message.Author.Username} --- Database model ---> DiscordName: {existingUser.DiscordName}, Steam id: {existingUser.SteamId}");
                 }
             }
         }
@@ -209,5 +232,35 @@ namespace pubgbot
         //}
 
         #endregion
+    }
+
+    internal class RegionConverter
+    {
+        private static List<string> regionList = new List<string>() {"AGG", "NA", "EU", "AS", "OC", "SA", "SEA"};
+
+        public static Region Convert(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return Region.NA;
+            if (!regionList.Contains(s.Trim().ToUpper())) return Region.NA;
+            switch (s)
+            {
+                case "AGG":
+                    return Region.AGG;
+                case "NA":
+                    return Region.NA;
+                case "EU":
+                    return Region.EU;
+                case "AS":
+                    return Region.AS;
+                case "OC":
+                    return Region.OC;
+                case "SA":
+                    return Region.SA;
+                case "SEA":
+                    return Region.SEA;
+                default:
+                    return Region.NA;
+            }
+        }
     }
 }

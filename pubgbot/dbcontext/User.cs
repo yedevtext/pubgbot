@@ -1,3 +1,5 @@
+using PUBGSharp.Data;
+
 namespace pubgbot.dbcontext
 {
     using System;
@@ -17,7 +19,7 @@ namespace pubgbot.dbcontext
         [StringLength(150)]
         public string SteamId { get; set; }
 
-        [StringLength(50)]
-        public string Location { get; set; }
+       
+        public Region Region { get; set; }
     }
 }
